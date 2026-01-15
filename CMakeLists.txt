@@ -16,7 +16,7 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 
 add_executable(fake_robot src/fake_robot.cpp)
-add_executable(mcl_node src/mcl_node.cpp) # added by me
+add_executable(mcl_node src/mcl_node.cpp src/mcl.cpp) # added by me
 
 include_directories(include) # added by me
 

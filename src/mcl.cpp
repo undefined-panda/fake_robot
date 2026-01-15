@@ -19,7 +19,8 @@ MCL::MCL()
 MCL::~MCL() = default;
 
 /**
- * @brief Set values for the map and map boundaries.
+ * @brief Initialize map and set map boundaries.
+ * @param landmarks Vector of {id, x, y}
  */
 void MCL::setMap(const std::vector<Landmark>& landmarks)
 {
@@ -60,7 +61,8 @@ void MCL::setMap(const std::vector<Landmark>& landmarks)
 }
 
 /**
- * @brief Initialie num_particles particles.
+ * @brief Initialie num_particles particles uniformly distributed across the whole map.
+ * @param num_particles Number of particles
  */
 void MCL::initializeParticles(std::size_t num_particles)
 {
@@ -78,65 +80,88 @@ void MCL::initializeParticles(std::size_t num_particles)
 
         particles_.push_back(particle);
   };
+
+  particles_initialized_ = true;
 }
 
 /**
  * @brief Return particles.
+ * @return Vector of {x, y, theta}
  */
 const std::vector<Particle>& MCL::getParticles() const
 {
   return particles_;
 }
 
-// x - particle, x with _ on top - odometry pose, x' with _ - next odometry pose, x' - next particle
-// lecture 6 slide 40
+/**
+ * @brief Apply odometry-based motion model to each particle
+ * 
+ * Calculation is taken from the lecture "Autonomous Mobile Robots" lecture 6 slide 40.
+ * A Gaussian noise is added to translation and rotation. Orientations are normalized.
+ * 
+ * @param delta Structure with value difference of current and previous odometry
+ * @param variance Translation and rotation variance
+ */
 void MCL::motionUpdate(MotionDelta delta, MotionNoise variance)
 {
     if (particles_.empty()) throw std::runtime_error("MCL::motionUpdate(): no particles initialized");
 
     for (auto& particle : particles_){
+        // gaussian noise
         double noise_rot1 = normal_dist(0.0, std::sqrt(variance.var_rot));
         double noise_rot2 = normal_dist(0.0, std::sqrt(variance.var_rot));
         double noise_trans = normal_dist(0.0, std::sqrt(variance.var_trans));
 
-        double delta_rot1 = delta.rot1 + noise_rot1;
-        double delta_rot2 = delta.rot2 + noise_rot2;
-        double delta_trans = delta.trans + noise_trans;
+        // delta values
+        double delta_rot1 = normalizeAngle(delta.rot1 + noise_rot1);
+        double delta_rot2 = normalizeAngle(delta.rot2 + noise_rot2);
+        double delta_trans = std::max(0.0, delta.trans + noise_trans);
 
+        // odometry-based motion model
         particle.x += delta_trans * std::cos(particle.theta + delta_rot1);
         particle.y += delta_trans * std::sin(particle.theta + delta_rot1);
-        particle.theta += delta_rot1 + delta_rot2;
-
-        normalizeAngle(&particle.theta);
+        particle.theta = normalizeAngle(particle.theta + delta_rot1 + delta_rot2);
     }
 }
 
 /**
- * @brief Compute likelihood of particle, i.e. possibility of observations if robot pose is current particle
- *        Using log likelihood to avoid numerical underflow and using addition instead of multiplikation
+ * @brief Compute likelihoof of particle using observed landmarks
+ * 
+ * 
+ * Likelihood of particle, i.e. possibility of observations if robot pose is current particle.
+ * Using log likelihood to avoid numerical underflow and using addition instead of multiplikation. Weights are normalized
+ * 
+ * @param observations Vector of {id, x, y}
  */
 void MCL::measurementUpdate(const std::vector<Landmark>& observations)
 {
     // particle weights stay the same if no observations are made
-    if (observations.empty()){
-        return;
-    }
+    if (observations.empty()) return;
+
+    // or particles not initialized yet
+    if (!particles_initialized_) return;
 
     double weight_sum = 0.0;
+    std::vector<double> likelihoods;
+    likelihoods.reserve(particles_.size());
+    double maxlog = -std::numeric_limits<double>::infinity();
+
     for (Particle& particle : particles_){
         double log_likelihood = 0.0;
 
         // calculate distance of observed landmark to true landmark
         for (const Landmark& observation : observations){
-            Landmark lm_map = map_[observation.id];
+            auto it = map_.find(observation.id);
+            if (it == map_.end()) continue;
+            const Landmark& lm_map = it->second;
 
             // transform landmark position from world frame (landmarks) to robot frame (observations)
 
-            // translation of world frame to robot frame           
+            // first: translation of world frame to robot frame           
             double lm_x = lm_map.x - particle.x;
             double lm_y = lm_map.y - particle.y;
 
-            // inverse rotation of world frame vector by particle.theta to robot frame
+            // second: inverse rotation of world frame vector by particle.theta to robot frame
             // x_r = R(-theta) * x_w
             // R(theta) = (cos(theta) -sin(theta))
             //            (sin(theta)  cos(theta))
@@ -149,20 +174,32 @@ void MCL::measurementUpdate(const std::vector<Landmark>& observations)
             log_likelihood += lm_distance;
         }
 
-        particle.weight = std::max(std::exp(log_likelihood), 1e-300);
-        weight_sum += particle.weight;
+        maxlog = std::max(maxlog, log_likelihood);
+        likelihoods.push_back(log_likelihood);
+    }
+
+    // subtract max log for stabilization
+    for (size_t i = 0; i < particles_.size(); i++){
+        particles_[i].weight = std::exp(likelihoods[i] - maxlog);
+        weight_sum += particles_[i].weight;
     }
 
     // normalize weights
     if (weight_sum > 0){
-        for (Particle& particle : particles_) {
-            particle.weight /= weight_sum;
-        }
+        for (Particle& particle : particles_) particle.weight /= weight_sum;
     }    
 }
 
+/**
+ * @brief Resample particles using low-variance resampling
+ * 
+ * Low-variance calculation is taken from the lecture "Autonomous Mobile Robots" lecture 6 slide 60.
+ */
 void MCL::resampling(const int M)
 {
+    // no resampling if particles are not initialized yet
+    if (!particles_initialized_) return;
+
     std::vector<double> particle_weights;
     particle_weights.clear();
     particle_weights.reserve(particles_.size());
@@ -175,11 +212,10 @@ void MCL::resampling(const int M)
         particle_weights.push_back(particle.weight);
     }
 
-    // lecture 6 slide 60
     // lay particle weights in order and create M uniform distributed marker that point at some weights
     // sample particles where the current marker points at
 
-    double r = uniform_dist(0.0, 1.0 / M); // random start for marker
+    double r = uniform_dist(0.0, 1.0 / static_cast<double>(M)); // random start for marker
     double cumulative_weight = particle_weights[0]; // keep track of weights at current marker
     int j = 0;
 
@@ -193,15 +229,21 @@ void MCL::resampling(const int M)
         }
 
         Particle p = particles_[j];
-        p.weight = 1 / M;
+        p.weight = 1.0 / static_cast<double>(M);;
         resampled_particles.push_back(p);
     }
 
     particles_ = resampled_particles;
 }
 
-Pose MCL::poseEstimation()
+/**
+ * @brief Estimate pose by computing weighted mean of particles and publish to ROS2 topic.
+ * @return Estimated pose - computed weighted mean of particles
+ */
+std::optional<Pose> MCL::poseEstimation()
 {
+    if (!particles_initialized_) return std::nullopt;
+
     double x_mean = 0.0;
     double y_mean = 0.0;
     double sin_mean = 0.0;
@@ -217,7 +259,7 @@ Pose MCL::poseEstimation()
     }
 
     double theta_mean = std::atan2(sin_mean, cos_mean);
-    normalizeAngle(&theta_mean);
+    theta_mean = normalizeAngle(theta_mean);
 
     return Pose {x_mean, y_mean, theta_mean};
 }
@@ -226,9 +268,11 @@ Pose MCL::poseEstimation()
 // Helper Functions
 // ----------------------------
 
-void MCL::normalizeAngle(double* angle) {
-    while (*angle > M_PI) *angle -= 2.0 * M_PI;
-    while (*angle < -M_PI) *angle += 2.0 * M_PI;
+double MCL::normalizeAngle(double angle) 
+{
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
 }
 
 double MCL::uniform_dist(double min, double max)

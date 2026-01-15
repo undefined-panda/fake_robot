@@ -5,6 +5,7 @@
 #include <random>
 #include <array>
 #include <unordered_map>
+#include <optional>
 
 /**
  * @brief Particle struct with state[x, y, theta] and weight
@@ -79,14 +80,20 @@ public:
 
     void resampling(const int M);
 
-    Pose poseEstimation();
+    std::optional<Pose> poseEstimation();
+
+    double normalizeAngle(double angle);
+
+    // ----------------------------
+    // Attributes 
+    // ----------------------------
+
+    double measurement_noise_variance;
 
 private:
     // ----------------------------
     // Helper Functions 
     // ----------------------------
-
-    void normalizeAngle(double* angle);
 
     /**
      * @brief Uniform distribution sample with boundaries.
@@ -105,14 +112,13 @@ private:
     // ----------------------------
 
     std::unordered_map<int, Landmark> map_; // store it as unordered map to access landmarks using their ID as index
-    bool map_initialized_;
+    bool map_initialized_ = false;
+    bool particles_initialized_ = false;
     std::array<double, 4> bounds_;
 
     std::vector<Particle> particles_;
 
     std::mt19937 rng_;
-
-    double measurement_noise_variance;
 };
 
 #endif  // MONTE_CARLO_LOCALIZATION_HPP

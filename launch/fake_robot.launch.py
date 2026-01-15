@@ -49,7 +49,7 @@ def generate_launch_description():
     
     measurement_noise_variance_arg = DeclareLaunchArgument(
         'measurement_noise_variance',
-        default_value='0.01',
+        default_value='0.1',
         description='Variance of Gaussian noise added to landmark measurements'
     )
 
@@ -57,7 +57,7 @@ def generate_launch_description():
     # Noise now affects traveled distance (along motion direction) and orientation
     robot_noise_variance_x_arg = DeclareLaunchArgument(
         'robot_noise_variance_x',
-        default_value='0.01',
+        default_value='0.1',
         description='Variance of accumulated noise on traveled distance (m^2)'
     )
 
@@ -94,6 +94,22 @@ def generate_launch_description():
             }
         ]
     )
+
+    # Create the node
+    mcl_node = Node(
+        package='fake_robot',
+        executable='mcl_node',
+        name='mcl_node',
+        output='screen',
+        parameters=[
+            {
+                'measurement_noise_variance': LaunchConfiguration('measurement_noise_variance'),
+                'robot_noise_variance_x': LaunchConfiguration('robot_noise_variance_x'),
+                'robot_noise_variance_y': LaunchConfiguration('robot_noise_variance_y'),
+                'robot_noise_variance_theta': LaunchConfiguration('robot_noise_variance_theta'),
+            }
+        ]
+    )
     
     return LaunchDescription([
         landmarks_file_arg,
@@ -107,4 +123,5 @@ def generate_launch_description():
         robot_noise_variance_y_arg,
         robot_noise_variance_theta_arg,
         fake_robot_node,
+        mcl_node
     ])
