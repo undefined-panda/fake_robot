@@ -1,7 +1,5 @@
 /**
  * This class implements a Monte Carlo Localization algorithm.
- * Author: Jad Dayoub
- * Student ID: 2848370
 */
 
 #include "mcl/mcl.hpp"
