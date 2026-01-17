@@ -32,18 +32,17 @@ public:
 
         this->declare_parameter<double>("measurement_noise_variance", 0.1);
         this->declare_parameter<double>("robot_noise_variance_theta", 0.01);
-        this->declare_parameter<int>("num_particles", 100);
-        this->declare_parameter<int>("M", 100);
-
-        
-        double meas_var = this->get_parameter("measurement_noise_variance").as_double();
-        // double rot_var  = this->get_parameter("robot_noise_variance_theta").as_double();
-        num_particles = this->get_parameter("num_particles").as_int();
-        M = this->get_parameter("M").as_int();
+        this->declare_parameter<int>("num_particles", 250);
 
         // initialize MCL
         mcl_ = std::make_unique<MCL>();
-        mcl_->measurement_noise_variance = meas_var;
+        mcl_->measurement_noise_variance = this->get_parameter("measurement_noise_variance").as_double();
+        mcl_->num_particles = this->get_parameter("num_particles").as_int();
+
+        alpha1 = 0.05;
+        alpha2 = 0.05;
+        alpha3 = 0.02;
+        alpha4 = 0.02;
 
         // Create subscriber
         landmarks_gt_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -95,7 +94,11 @@ private:
     bool first_odom_ = true; // to check if received odometry is first one
 
     int num_particles;
-    int M;
+
+    double alpha1;
+    double alpha2;
+    double alpha3;
+    double alpha4;
 
     void landmarksGtCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
         // RCLCPP_INFO(this->get_logger(), "calling landmarksGtCallback");
@@ -125,7 +128,7 @@ private:
             mcl_->setMap(landmarks);
             RCLCPP_INFO(this->get_logger(), "Map initialized");
 
-            mcl_->initializeParticles(num_particles);
+            mcl_->initializeParticles();
             RCLCPP_INFO(this->get_logger(), "Particles initialized");
 
             RCLCPP_DEBUG(this->get_logger(), "Processed %d landmark observations", count);
@@ -169,16 +172,16 @@ private:
         // set variance values
         MotionNoise variance;
 
-        double var_x = msg->pose.covariance[0];
-        double var_y = msg->pose.covariance[7];
-        double var_yaw = msg->pose.covariance[35];
+        // double var_x = msg->pose.covariance[0];
+        // double var_y = msg->pose.covariance[7];
+        // double var_yaw = msg->pose.covariance[35];
 
-        variance.var_trans = std::max(1e-6, 0.5*(var_x + var_y));
-        variance.var_rot   = std::max(1e-6, var_yaw);
+        // variance.var_trans = std::max(1e-6, 0.5*(var_x + var_y));
+        // variance.var_rot   = std::max(1e-6, var_yaw);
+        variance.var_trans = alpha3 * delta.trans * delta.trans + alpha4 * (delta.rot1 * delta.rot1 + delta.rot2 * delta.rot2);
+        variance.var_rot = alpha1 * (delta.rot1 * delta.rot1 + delta.rot2 * delta.rot2) + alpha2 * delta.trans * delta.trans;
 
-        // RCLCPP_INFO(this->get_logger(), "enter motionUpdate");
         mcl_->motionUpdate(delta, variance);
-        // RCLCPP_INFO(this->get_logger(), "left motionUpdate");
         
         prev_odom_ = curr_odom;
     }
@@ -212,10 +215,9 @@ private:
                 count++;
             }
 
-            RCLCPP_INFO(this->get_logger(), "obs=%zu", landmark_observations.size());
             mcl_->measurementUpdate(landmark_observations);
 
-            mcl_->resampling(M);
+            mcl_->resampling();
 
             publishParticles();
 
@@ -230,9 +232,7 @@ private:
     }
 
     void publishEstimatedPose()
-    {
-        // RCLCPP_INFO(this->get_logger(), "calling publishEstimatedPose");
-        
+    {        
         auto pose_opt = mcl_->poseEstimation();
         if (!pose_opt) return;
 

@@ -61,9 +61,8 @@ public:
 
     /**
      * @brief Initialie num_particles particles.
-     * @param num_particles numer of particles
      */
-    void initializeParticles(std::size_t num_particles);
+    void initializeParticles();
 
     /**
      * @brief Return particles.
@@ -78,7 +77,7 @@ public:
 
     void measurementUpdate(const std::vector<Landmark>& observations);
 
-    void resampling(const int M);
+    void resampling();
 
     std::optional<Pose> poseEstimation();
 
@@ -89,6 +88,7 @@ public:
     // ----------------------------
 
     double measurement_noise_variance;
+    int num_particles;
 
 private:
     // ----------------------------
@@ -106,6 +106,7 @@ private:
 
     double distance(double x1, double y1, double x2, double y2);
 
+    double num_effective_particles();
 
     // ----------------------------
     // Attributes 

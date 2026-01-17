@@ -60,21 +60,20 @@ void MCL::setMap(const std::vector<Landmark>& landmarks)
 
 /**
  * @brief Initialie num_particles particles uniformly distributed across the whole map.
- * @param num_particles Number of particles
  */
-void MCL::initializeParticles(std::size_t num_particles)
+void MCL::initializeParticles()
 {
     if (!map_initialized_) throw std::runtime_error("MCL::initializeParticles(): landmarks not initialized");
 
     particles_.clear();
 
-    for (size_t i = 0; i < num_particles; i++){
+    for (size_t i = 0; i < MCL::num_particles; i++){
         Particle particle;
 
         particle.x = uniform_dist(bounds_[0], bounds_[1]);
         particle.y = uniform_dist(bounds_[2], bounds_[3]);
         particle.theta = uniform_dist(-M_PI, M_PI);
-        particle.weight = 1.0 / num_particles;
+        particle.weight = 1.0 / MCL::num_particles;
 
         particles_.push_back(particle);
   };
@@ -167,7 +166,7 @@ void MCL::measurementUpdate(const std::vector<Landmark>& observations)
             double lm_y_r = -std::sin(particle.theta) * lm_x + std::cos(particle.theta) * lm_y;
 
             // using distance directly instead of std::exp(...) and then std::log(...)
-            double lm_distance = -std::pow(distance(lm_x_r, lm_y_r, observation.x, observation.y), 2) / (2 * measurement_noise_variance);
+            double lm_distance = -std::pow(distance(lm_x_r, lm_y_r, observation.x, observation.y), 2) / (2 * MCL::measurement_noise_variance);
 
             log_likelihood += lm_distance;
         }
@@ -178,14 +177,14 @@ void MCL::measurementUpdate(const std::vector<Landmark>& observations)
 
     // subtract max log for stabilization
     for (size_t i = 0; i < particles_.size(); i++){
-        particles_[i].weight = std::exp(likelihoods[i] - maxlog);
+        particles_[i].weight *= std::exp(likelihoods[i] - maxlog);
         weight_sum += particles_[i].weight;
     }
 
     // normalize weights
     if (weight_sum > 0){
         for (Particle& particle : particles_) particle.weight /= weight_sum;
-    }    
+    }
 }
 
 /**
@@ -193,45 +192,42 @@ void MCL::measurementUpdate(const std::vector<Landmark>& observations)
  * 
  * Low-variance calculation is taken from the lecture "Autonomous Mobile Robots" lecture 6 slide 60.
  */
-void MCL::resampling(const int M)
+void MCL::resampling()
 {
     // no resampling if particles are not initialized yet
     if (!particles_initialized_) return;
 
-    std::vector<double> particle_weights;
-    particle_weights.clear();
-    particle_weights.reserve(particles_.size());
-
     std::vector<Particle> resampled_particles;
     resampled_particles.clear();
-    resampled_particles.reserve(M);
+    resampled_particles.reserve(MCL::num_particles);
 
-    for (const Particle& particle : particles_){
-        particle_weights.push_back(particle.weight);
-    }
+    // only resample if samples have significantly different weights
+    const double Neff = MCL::num_effective_particles();
+    if (Neff < 0.5 * particles_.size()) {
 
-    // lay particle weights in order and create M uniform distributed marker that point at some weights
-    // sample particles where the current marker points at
+        // lay particle weights in order and create M uniform distributed marker that point at some weights
+        // sample particles where the current marker points at
 
-    double r = uniform_dist(0.0, 1.0 / static_cast<double>(M)); // random start for marker
-    double cumulative_weight = particle_weights[0]; // keep track of weights at current marker
-    int j = 0;
+        double r = uniform_dist(0.0, 1.0 / static_cast<double>(MCL::num_particles)); // random start for marker
+        double cumulative_weight = particles_[0].weight; // keep track of weights at current marker
+        int j = 0;
 
-    for (int i = 0; i < M; i++) {
-        double marker_pos = r + static_cast<double>(i) / M; // increase marker position by 1/M
-        
-        // increase cumulative_weight until current marker position is reached to get to next particle weight
-        while (marker_pos > cumulative_weight && j < particles_.size() - 1){
-            j++;
-            cumulative_weight += particle_weights[j];
+        for (int i = 0; i < MCL::num_particles; i++) {
+            double marker_pos = r + static_cast<double>(i) / static_cast<double>(MCL::num_particles); // increase marker position by 1/M
+            
+            // increase cumulative_weight until current marker position is reached to get to next particle weight
+            while (marker_pos > cumulative_weight && j < particles_.size() - 1){
+                j++;
+                cumulative_weight += particles_[j].weight;
+            }
+
+            Particle p = particles_[j];
+            p.weight = 1.0 / static_cast<double>(MCL::num_particles);;
+            resampled_particles.push_back(p);
         }
 
-        Particle p = particles_[j];
-        p.weight = 1.0 / static_cast<double>(M);;
-        resampled_particles.push_back(p);
+        particles_ = resampled_particles;
     }
-
-    particles_ = resampled_particles;
 }
 
 /**
@@ -285,8 +281,28 @@ double MCL::normal_dist(double mean, double cov)
     return dist(rng_);
 }
 
-double MCL::distance(double x1, double y1, double x2, double y2) {
+double MCL::distance(double x1, double y1, double x2, double y2) 
+{
     double dx = x2 - x1;
     double dy = y2 - y1;
     return std::sqrt(dx * dx + dy * dy);
+}
+
+double MCL::num_effective_particles()
+{
+    std::vector<double> particle_weights;
+    particle_weights.clear();
+    particle_weights.reserve(MCL::num_particles);
+
+    for (const Particle& particle : particles_){
+        particle_weights.push_back(particle.weight);
+    }
+
+    double sum = 0.0;
+    for (auto weight : particle_weights){
+        sum += std::pow(weight, 2);
+    }
+
+    if (sum <= 0) return 0.0;
+    return 1/sum;
 }
