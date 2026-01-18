@@ -81,8 +81,7 @@ rviz2
 | num_particles              | Number of particles used in MCL      |
 | measurement_noise_variance | Landmark measurement noise           |
 | robot_noise_variance_x     | Translation noise for noisy odometry |
-| robot_noise_variance_theta | Rotation noise for noisy odometry    |
-| observation_radius         | Landmark observation range           |
+| alpha                      | Motion noise                         |
 
 ---
 
