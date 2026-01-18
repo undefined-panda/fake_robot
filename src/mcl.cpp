@@ -105,19 +105,19 @@ void MCL::motionUpdate(MotionDelta delta, MotionNoise variance)
 
     for (auto& particle : particles_){
         // gaussian noise
-        double noise_rot1 = normal_dist(0.0, std::sqrt(variance.var_rot));
-        double noise_rot2 = normal_dist(0.0, std::sqrt(variance.var_rot));
+        double noise_rot1 = normal_dist(0.0, std::sqrt(variance.var_rot1));
+        double noise_rot2 = normal_dist(0.0, std::sqrt(variance.var_rot2));
         double noise_trans = normal_dist(0.0, std::sqrt(variance.var_trans));
 
-        // delta values
-        double delta_rot1 = normalizeAngle(delta.rot1 + noise_rot1);
-        double delta_rot2 = normalizeAngle(delta.rot2 + noise_rot2);
-        double delta_trans = std::max(0.0, delta.trans + noise_trans);
+        // delta hat values
+        double delta_trans_hat = std::max(0.0, delta.trans + noise_trans);
+        double delta_rot1_hat = normalizeAngle(delta.rot1 + noise_rot1);
+        double delta_rot2_hat = normalizeAngle(delta.rot2 + noise_rot2);
 
         // odometry-based motion model
-        particle.x += delta_trans * std::cos(particle.theta + delta_rot1);
-        particle.y += delta_trans * std::sin(particle.theta + delta_rot1);
-        particle.theta = normalizeAngle(particle.theta + delta_rot1 + delta_rot2);
+        particle.x += delta_trans_hat * std::cos(particle.theta + delta_rot1_hat);
+        particle.y += delta_trans_hat * std::sin(particle.theta + delta_rot1_hat);
+        particle.theta = normalizeAngle(particle.theta + delta_rot1_hat + delta_rot2_hat);
     }
 }
 

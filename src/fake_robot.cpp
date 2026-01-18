@@ -76,6 +76,14 @@ public:
     }
     
     RCLCPP_INFO(this->get_logger(), "Loaded %zu landmarks", landmarks_.size());
+
+    // Create .csv files to store values
+    robot_gt_csv_.open("robot_gt.csv", std::ios::out | std::ios::trunc);
+    if (robot_gt_csv_.is_open()) {
+      robot_gt_csv_ << "timestamp,x,y,theta,vx,vy,vtheta\n";
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Failed to open CSV file: robot_gt.csv");
+    }
     
     // Initialize both GT and noisy robot pose to same starting location on circle
     // At t=0: theta=0, position on circle at theta=0
@@ -120,6 +128,9 @@ private:
   rclcpp::TimerBase::SharedPtr robot_timer_;
   rclcpp::TimerBase::SharedPtr observed_timer_;
     rclcpp::TimerBase::SharedPtr robot_noisy_timer_;
+
+  // ADDED BY ME: CSV files to store values
+  std::ofstream robot_gt_csv_;
   
   // Circle trajectory parameters
   double circle_radius_;
@@ -304,6 +315,19 @@ private:
     for (size_t i = 0; i < 36; ++i) odom.twist.covariance[i] = 0.0;
 
     robot_publisher_->publish(odom);
+
+    // ADDED BY ME
+    if (robot_gt_csv_.is_open()) {
+      int64_t timestamp_ns = now.nanoseconds();
+      robot_gt_csv_ << timestamp_ns << ","
+                    << robot_x_ << ","
+                    << robot_y_ << ","
+                    << robot_theta_gt_ << ","
+                    << odom.twist.twist.linear.x << ","
+                    << odom.twist.twist.linear.y << ","
+                    << odom.twist.twist.angular.z << "\n";
+      robot_gt_csv_.flush();
+    }
 
     // Publish robot transform (same as before)
     geometry_msgs::msg::TransformStamped transform_stamped;

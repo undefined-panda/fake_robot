@@ -12,6 +12,7 @@
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 
 #include "mcl/mcl.hpp"
+#include <fstream>
 
 /**
  * @brief Convert quaternion to yaw angle
@@ -31,18 +32,25 @@ public:
         RCLCPP_INFO(this->get_logger(), "Initializing Monte Carlo Localization");
 
         this->declare_parameter<double>("measurement_noise_variance", 0.1);
-        this->declare_parameter<double>("robot_noise_variance_theta", 0.01);
         this->declare_parameter<int>("num_particles", 250);
+        this->declare_parameter<double>("alpha1", 0.05);
+        this->declare_parameter<double>("alpha2", 0.05);
+        this->declare_parameter<double>("alpha3", 0.1);
+        this->declare_parameter<double>("alpha4", 0.05);
+
+        double measurement_noise_variance = this->get_parameter("measurement_noise_variance").as_double();
+        num_particles = this->get_parameter("num_particles").as_int();
+        alpha1 = this->get_parameter("alpha1").as_double();
+        alpha2 = this->get_parameter("alpha2").as_double();
+        alpha3 = this->get_parameter("alpha3").as_double();
+        alpha4 = this->get_parameter("alpha4").as_double();
+
+        RCLCPP_INFO(this->get_logger(), "MCL started with %d particles", num_particles);
 
         // initialize MCL
         mcl_ = std::make_unique<MCL>();
-        mcl_->measurement_noise_variance = this->get_parameter("measurement_noise_variance").as_double();
-        mcl_->num_particles = this->get_parameter("num_particles").as_int();
-
-        alpha1 = 0.05;
-        alpha2 = 0.05;
-        alpha3 = 0.02;
-        alpha4 = 0.02;
+        mcl_->measurement_noise_variance = measurement_noise_variance;
+        mcl_->num_particles = num_particles;
 
         // Create subscriber
         landmarks_gt_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -77,8 +85,15 @@ public:
         );
         RCLCPP_INFO(this->get_logger(), "Publishing to /particles");
         
-
         RCLCPP_INFO(this->get_logger(), "MCL Node initialized successfully");
+
+
+        estimated_pos_.open("estimated_pos.csv", std::ios::out | std::ios::trunc);
+        if (estimated_pos_.is_open()) {
+            estimated_pos_ << "timestamp,x,y,theta\n";
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "Failed to open CSV file: estimated_pos.csv");
+        }
     }
 
 private:
@@ -88,6 +103,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr estimated_pose_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr particles_;
     std::unique_ptr<MCL> mcl_;
+    std::ofstream estimated_pos_;
 
     bool initialized_ = false; // to check if map and particles are initialized
     Pose prev_odom_;
@@ -165,21 +181,15 @@ private:
         double y_diff = curr_odom.y - prev_odom_.y;
         double theta_diff = mcl_->normalizeAngle(curr_odom.theta - prev_odom_.theta);
 
+        delta.trans = std::sqrt(std::pow(x_diff, 2) + std::pow(y_diff, 2));
         delta.rot1 = mcl_->normalizeAngle(std::atan2(y_diff, x_diff) - prev_odom_.theta);
         delta.rot2 = mcl_->normalizeAngle(theta_diff - delta.rot1);
-        delta.trans = std::sqrt(std::pow(x_diff, 2) + std::pow(y_diff, 2));
 
         // set variance values
         MotionNoise variance;
-
-        // double var_x = msg->pose.covariance[0];
-        // double var_y = msg->pose.covariance[7];
-        // double var_yaw = msg->pose.covariance[35];
-
-        // variance.var_trans = std::max(1e-6, 0.5*(var_x + var_y));
-        // variance.var_rot   = std::max(1e-6, var_yaw);
-        variance.var_trans = alpha3 * delta.trans * delta.trans + alpha4 * (delta.rot1 * delta.rot1 + delta.rot2 * delta.rot2);
-        variance.var_rot = alpha1 * (delta.rot1 * delta.rot1 + delta.rot2 * delta.rot2) + alpha2 * delta.trans * delta.trans;
+        variance.var_trans = alpha3 * std::pow(delta.trans, 2) + alpha4 * std::pow(delta.rot1, 2) + alpha4 * std::pow(delta.rot2, 2);
+        variance.var_rot1 = alpha1 * std::pow(delta.rot1, 2) + alpha2 * std::pow(delta.trans, 2);
+        variance.var_rot2 = alpha1 * std::pow(delta.rot2, 2) + alpha2 * std::pow(delta.trans, 2);
 
         mcl_->motionUpdate(delta, variance);
         
@@ -221,7 +231,7 @@ private:
 
             publishParticles();
 
-            publishEstimatedPose();
+            publishEstimatedPose(msg);
             
             RCLCPP_DEBUG(this->get_logger(), 
                 "Processed %d landmark observations", count);
@@ -231,15 +241,16 @@ private:
         }
     }
 
-    void publishEstimatedPose()
+    void publishEstimatedPose(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {        
         auto pose_opt = mcl_->poseEstimation();
         if (!pose_opt) return;
 
         Pose pos = *pose_opt;
+        const rclcpp::Time timestamp = msg->header.stamp;
 
         geometry_msgs::msg::PoseStamped estimated_pose;
-        estimated_pose.header.stamp = this->now();
+        estimated_pose.header.stamp = timestamp;
         estimated_pose.header.frame_id = "map";
 
         estimated_pose.pose.position.x = pos.x;
@@ -251,6 +262,16 @@ private:
         estimated_pose.pose.orientation = tf2::toMsg(q);
 
         estimated_pose_pub_->publish(estimated_pose);
+
+        // Store values in CSV file
+        if (estimated_pos_.is_open()) {
+            int64_t timestamp_ns = timestamp.nanoseconds();
+            estimated_pos_ << timestamp_ns << ","
+                           << pos.x << ","
+                           << pos.y << ","
+                           << pos.theta << "\n";
+            estimated_pos_.flush();
+        }
     }
 
     void publishParticles()

@@ -49,9 +49,41 @@ def generate_launch_description():
     
     measurement_noise_variance_arg = DeclareLaunchArgument(
         'measurement_noise_variance',
-        default_value='0.1',
+        default_value='0.01',
         description='Variance of Gaussian noise added to landmark measurements'
     )
+
+    # ADDED BY ME
+    num_particles_arg = DeclareLaunchArgument(
+        'num_particles',
+        default_value='250',
+        description='Number of particles for MCL'
+    )
+
+    alpha1 = DeclareLaunchArgument(
+        'alpha1',
+        default_value='0.05',
+        description='Motion noise alpha 1'
+    )
+
+    alpha2 = DeclareLaunchArgument(
+        'alpha2',
+        default_value='0.05',
+        description='Motion noise alpha 2'
+    )
+
+    alpha3 = DeclareLaunchArgument(
+        'alpha3',
+        default_value='0.1',
+        description='Motion noise alpha 3'
+    )
+
+    alpha4 = DeclareLaunchArgument(
+        'alpha4',
+        default_value='0.05',
+        description='Motion noise alpha 4'
+    )
+
 
     # Robot odometry noise parameters (for noisy odometry)
     # Noise now affects traveled distance (along motion direction) and orientation
@@ -107,6 +139,7 @@ def generate_launch_description():
                 'robot_noise_variance_x': LaunchConfiguration('robot_noise_variance_x'),
                 'robot_noise_variance_y': LaunchConfiguration('robot_noise_variance_y'),
                 'robot_noise_variance_theta': LaunchConfiguration('robot_noise_variance_theta'),
+                'num_particles': LaunchConfiguration('num_particles'), # ADDED BY ME
             }
         ]
     )
@@ -122,6 +155,11 @@ def generate_launch_description():
         robot_noise_variance_x_arg,
         robot_noise_variance_y_arg,
         robot_noise_variance_theta_arg,
+        num_particles_arg,
+        alpha1,
+        alpha2,
+        alpha3,
+        alpha4,
         fake_robot_node,
         mcl_node
     ])

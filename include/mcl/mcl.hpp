@@ -34,8 +34,9 @@ struct MotionDelta {
 };
 
 struct MotionNoise {
-  double var_rot;
+  double var_rot1;
   double var_trans;
+  double var_rot2;
 };
 
 struct Pose {
